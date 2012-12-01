@@ -1,0 +1,356 @@
+/*
+  8 DigitShield: code to test display on two 4 digit sheilds wired in serial
+  
+
+  The circuit:
+  * Two 4 digit shields connected to Arduino 2 wire interace throught SDL, SDA.
+  * Connections to Arduino UNO (board oriented with USB at top)
+  - Arduino ANALOG connector (lower left) to Sheild connector upper left 
+  --SCL = Arduino pin 1 (A5) to Sheild pin 1 (SCL)
+  --SDA = Arduino pin 2 (A4) to SHild pin 2 (SDA)
+  -Arduino POWER connector (upper left) to SHeild connector upper right
+  --GND = Arduino pin 6,7 to Sheild pin 4,5
+
+  Created 11/16/2012
+  By Don Kleinschnitz: 
+  Created initial version using SheildStudio library functions. 
+  Modified library functions and built them into single code base (no libries) for testing for 2x4 displays connected in serial to Arduino UNO.
+  
+  Modified day month year
+  By author's name
+
+  
+*/
+
+/* coding styles
+Classes: 
+Class names are nouns in UpperCamelCase, with the first letter of every word capitalised. Use whole words — avoid acronyms and abbreviations (unless the abbreviation is much more widely used than the long form, such as URL or HTML).  
+
+Methods: 
+Methods are verbs in lowerCamelCase; that is, with the first letter lowercase and the first letters of subsequent words in uppercase. 
+
+Variables Local variables, instance variables, and class variables are also written  staring with with underscore (_). Variable names should be short yet meaningful. The choice of a variable name should be mnemonic — that is, designed to indicate to the casual observer the intent of its use. One-character variable names should be avoided except for temporary "throwaway" variables. 
+
+Constants: are written in uppercase characters separated by underscores. Constant names may also contain digits if appropriate, but not as the first character.
+*/
+
+/*Sheild JUMPER DEFINITIONS:
+Jumpers in upper left of each 4 digit shield
+Board Adr jumper table [identical for each DU]
+| = jumper installed across that group of pins
+                  JP1(AD0)     JP2(AD1)
+Adr = 0x50 (DU1)  - - - |      - - - |
+                  - - - |      - - - |
+Adr = 0x51 (DU2)  - - - |      - - | -
+                  - - - |      - - | -
+*/
+
+//MAX6953 EPL+ Display controller REGISTER DEFINITIONS 
+//identical set for each Display Unit (DU)] ////////////
+//Intensity10 Register: ADR 0x01
+  //bit assignments: 
+  //D0-D3 display digit 0 nibble 
+  //(intensity value = 1-16th of peak value) 
+  //D4-D8 display digit 1 nibble (intensity value = 1-16th of peak
+  //value)
+//Intensity32 Register: ADR 0x01
+	//bit assignments:
+	//D0-D3: display digit 2 nibble (intensity value = 1-16th of peak value)
+	//D4-D8: display digit 3 nibble (intensity value = 1-16th of peak value)
+//Test Register: ADR 0x07
+	//bit assignments
+	//D0:0x01 = (1= test,, 0=no test)
+	//D1-D7: = don't care
+//Configuration register: ADR 0x04, 
+	//bit assignments:
+	//D0:0x01=s (shutdown 1= normal, 0 = shutdown
+	//D1:0x02=x (don't care)
+	//D2:0x04=B (blink rate 1=fast 0=slow)
+	//D3:0x08=E (blink 1= on, 0 = off)
+	//D4:0x10=T (1=reset blink counter for syncing)
+	//D5:0x20=R (clear both planes data)
+	//D4;0x40=x (don't care)
+	//D5;0x80= P (read blink phase 1=Plane 0, 0 = plane 1)
+ 
+#include <Wire> // include the I2C library
+
+//define general variables
+  _brightness = 0x33; //one nibble for each digit, see register 0x01
+                        //2.5mA to 37.5mA
+  _addressDU1 = 0x50; //default is 0x50 Set via Shield Jumpers for DU#1
+  _addressDU2 = 0x51; //default is 0x51 Set via Shield Jumpers for DU#2
+  _configurationregister = 0x00; //value clears config temp register
+  _activedigit = 0; //CANT FIND WHERE THIS IS USED?
+  _scrollspeed = 300; //scroll speed, time between shifts in ms
+  _ontime = 300; //set default test on time
+  _S_bit = 0x01;
+  _B_bit = 0x04;
+  _E_bit = 0x08; 
+  _bright = 0x33; //set bright to default value
+  _plane = 0; //set plane default to plane 0
+
+//Setup display
+Void void setup() {
+//startup serial and controllers
+Serial.begin(9600); // set up serial port
+Wire.begin(); //join i2c bus (address optional for master)
+void setup(); //setup both controllers
+}
+
+/* main code */
+void loop() {
+displayTest(_ontime); //test display by turning on for _ontime duration 
+}
+
+///////////FUNCTIONS/////////////////////
+
+// return the software version 
+int getVersion(void)
+{
+  return 1;
+}
+
+//set brightness 
+//bright: brightness value same format as _brightness
+void setBrightness(char _bright)
+{
+  _brightness = _bright;	//set brightness 
+  Setup(); //change controller values
+//Backlog: may want separate DU brightness values, is that useful?
+}
+
+//intitialize the displays, both DU's\\
+void Setup()
+{
+  Wire.beginTransmission(_addressDU1);	//connect to DU1  
+  WSend(0x01); //address intensity register for digits 0 & 1
+  WSend(_brightness); //write all segments 10 ma (1/brightness * peak current)
+  Wire.endTransmission();
+  
+  Wire.beginTransmission(_addressDU2);	//connect to DU1 
+  WSend(0x02); //address intensity register for 2 & 3
+  WSend(_brightness);	//write all segments 10 ma or bright value
+  Wire.endTransmission();
+  
+  loadSpecialChars(); //Load special fonts  
+  WakeUp();	//start up display
+  
+  Wire.beginTransmission(_addressDU2);	//connect to DU2  
+  WSend(0x01); //address intensity register for digits 0 & 1
+  WSend(_brightness); //write all segments 10 ma (1/brightness * peak current)
+  Wire.endTransmission();
+  
+  Wire.beginTransmission(_addressDU2);	//connect to DU2 
+  WSend(0x02); //address intensity register for 2 & 3
+  WSend(_brightness); //write all segments 10 ma or bright value
+  Wire.endTransmission();
+  
+  loadSpecialChars();/Load special fonts  
+  WakeUp();	//start up display
+//Backlog: loadSpecialChars() currently loads both displays don't need to call twice.
+//split into separate functions. loadSpecialCharD01, loadSpecialCharD02
+}
+
+//Test display LEDs on both DU's by turning them all on for programmed time..
+//_ontime: length of time display is on in milliseconds
+//Backlog:could make a Test on, test off method but afraid remote calls could leave in test and create power problems. 
+void displayTest(int _ontime)
+{
+  Wire.beginTransmission(_addressDU1);	//connect to DU1
+  WSend(0x07); //sends one byte to address the test register 
+  WSend((uint8_t)0x01); //set test bit in test register
+  delay(on_time);	//delay on_time
+  WSend((uint8_t)0x00; //turn display off
+  Wire.endTransmission();
+
+  Wire.beginTransmission(_addressDU1);	//then connect to DU2
+  WSend(0x07); //sends one byte to address the test register 
+  WSend((uint8_t)0x01); //set test bit in test register
+  delay(on_time);	//delay on_time
+  WSend((uint8_t)0x00; //turn display off
+  Wire.endTransmission();
+}
+
+//writes the temp config register to the controllers\\
+void writeConfig()
+{
+  Wire.beginTransmission(_addressDU1); //connect to DU1 
+  WSend(CONFIG_REGISTER);		//address the config register
+  WSend(_configurationregister);	//write the config reg values to controller
+  Wire.endTransmission();
+  Wire.beginTransmission(_addressDU2); //connect to DU2 
+  WSend(CONFIG_REGISTER);		//address the config register
+  WSend(_configurationregister);	//write the values
+  Wire.endTransmission();
+}
+
+//Turn on the shutdown mode, the controller can be programmed during this time \\
+void shutDown()
+{
+  _configurationregister &= ~S_bit;	//reset the S bit, leave all set bits alone
+  WriteConfig(); 	//writes config the controllers
+}
+
+// Take controller out of shutdown mode\\
+void wakeUp()
+{
+  _configurationregister |= S_bit;	//set the S bit and wakeup controller
+  WriteConfig();			//write config to controller
+}  
+
+//set controller to blink to slow or fast, blink mode will cause the controller to alternately display plane 0 then 1. The phase can be detected by reading bit 7 of the config register\\
+void displayBlink()
+{
+  _configurationregister &= ~B_bit; //reset the B bit setting "slow" blink rate 0x04
+  _configurationregister |= E_bit; 	//enable global blink 0x08
+  WriteConfig();	//write config to controller
+}
+
+void blinkFast()
+{
+  _configurationregister |= B_bit;	//set the B bit enabling fast blink rate
+  _configurationregister |= E_bit;	//set global blink enable
+  WriteConfig();	//write config to controller
+}
+
+void blinkOff(){
+  _configurationregister &= E_bit;	//reset the E bit disabling global blink
+  WriteConfig();
+}
+
+//Write a single digit into plane 0 or 1. 
+//plane: a zero defines plane 0 all other "plane" values are plane 1
+//segment: digit positon.
+//character: character to be written in segment 
+
+void writeDigit(char character,char segment, char plane)
+{
+  char baseplane = 0;	//temp value for constructing  base plan address
+  if (plane == 0x0) baseplane = 0x20;	//select base plane 0 if "plane" parameter is 0
+  else baseplane = 0x40; //select base plane 1
+If(segment <=4)	//DU1 digit?
+{
+Wire.beginTransmission(_addressDU1);	//connect to controller D1
+	
+switch (segment) //Add the base plane address to the digit address and send to controller
+
+	{
+   	case 1 :   WSend(digit1+baseplane);
+               break;
+    	case 2 :   WSend(digit2+baseplane);
+               break;
+   	case 3 :   WSend(digit3+baseplane);
+               break;
+    	case 4 :   WSend(digit4+baseplane);
+               break;
+  	}
+  	WSend(character);		//then send char to that digit
+  	Wire.endTransmission();
+
+}
+else	//must be a DU2 digit
+{
+Wire.beginTransmission(_addressDU2);	//connect to controller D2
+switch (segment)	//Add the base plane address to the digit address
+					//and send to controller
+
+	{
+   	 case 1 :   WSend(digit1+baseplane);
+               break;
+    	case 2 :   WSend(digit2+baseplane);
+               break;
+   	case 3 :   WSend(digit3+baseplane);
+               break;
+    	case 4 :   WSend(digit4+baseplane);
+               break;
+  	}
+  	WSend(character);
+  	Wire.endTransmission();
+}
+
+//write a sting of 8 characters to the display, end of string is "\0"
+//str[]: array containing string
+//plane: plane 0 or 1
+void writeString(const char str[], const char plane){
+char digarr[8] = {' ',' ',' ',' ',' ',' ',' ',' '};
+					//create scroll buffer
+					//set 8 blanks into buffer
+while (*str != '\0')	//go until there is a line feed
+{
+    for (int i = 0; i <= 7; i++)
+	{
+	digarr[i] = digarr[i+1];	//shift left
+    	digarr[7] = *str; 	//new value in last digit
+   	str++;		//increment source pointer
+	}
+    	Write8(&digarr[0],plane); //write scroll buffer to display 
+    	delay(_scrollspeed);
+}
+
+//writes each of the 8 digits with characters from array\\
+void write8Digits(char* str,char plane){
+  char theplane = 0;			//define a plane buffer to assemble address
+  if (plane == 0) theplane = 0x20;	//plane 0
+  else theplane = 0x40;			//plane 1
+  Wire.beginTransmission(_address_DU1);	//connect to DU1
+  WSend(theplane);			//set plane starting address
+  WSend(*(str+3));			//send data for digit 3, 0x20
+  WSend(*(str+2));			//send data for digit 2			
+  WSend(*(str+1));			//send data for digit 1			
+  WSend(*str);				//send data for digit 0
+  Wire.endTransmission();
+  Wire.beginTransmission(_address_DU2);	//connect to DU2
+  WSend(theplane);			//set plane starting address
+  WSend(*(str+7));			//send data for digit 7
+  WSend(*(str+6));			//send data for digit 6			
+  WSend(*(str+5));			//send data for digit 5			
+  WSend(*(str+4));			//send data for digit 4
+  Wire.endTransmission();
+}
+
+//send the same set of predefined special characters to DU1 & 2
+void loadSpecialChars()
+{
+  //write to DU1 font user area
+  Wire.beginTransmission(_addressDU1); // connect to DU1
+  WSend(0x05);	//User defined address pointer
+  WSend(0x80);	//set start of user font area
+  	
+  WSend(B1000000);	//+ deg up, binary value, font address auto increments
+  WSend(B1100111); 
+  WSend(B1110101); 
+  WSend(B1100111);
+  WSend(B1000000);
+
+  WSend(B0010000);  //+ deg down
+  WSend(B0110111); 
+  WSend(B1110101); 
+  WSend(B0110111);
+  WSend(B0010000);
+  Wire.endTransmission();
+
+//write to DU2 font user area  
+  Wire.beginTransmission(_addressDU2); // connect to DU2
+  WSend(0x05);
+  WSend(0x80);
+  	
+  WSend(B1000000);  //+ deg up
+  WSend(B1100111); 
+  WSend(B1110101); 
+  WSend(B1100111);
+  WSend(B1000000);
+
+  WSend(B0010000);  //+ deg down
+  WSend(B0110111); 
+  WSend(B1110101); 
+  WSend(B0110111);
+  WSend(B0010000);
+  Wire.endTransmission();
+}
+
+//set scrolling speed 
+//value: scrolling speed in milliseconds,300 is normal
+void setScrollSpeed(int value)
+{
+  _scrollspeed = value;
+}
